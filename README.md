@@ -6,10 +6,10 @@ Claude's built-in `claude --resume` only shows sessions from the folder you're c
 
 ```
    #  Last used         Folder                Title
-   1  2026-10-06 11:50  odoo-17.0             Claude session search and selector command
-   2  2026-10-06 11:48  odoo-17.0             HR module meeting requirements
-   3  2026-10-06 11:40  desktop app           Docker, Kubernetes & Helm learning guide
-   4  2026-10-05 17:08  odoo-17.0             Logistics
+   1  2026-10-06 11:50  my-api                Fix login token refresh
+   2  2026-10-06 11:48  my-api                Add pagination to orders endpoint
+   3  2026-10-06 11:40  desktop app           Docker & Kubernetes learning guide
+   4  2026-10-05 17:08  website               Landing page redesign
 
 Number = open, text = filter, +name = new session, * = show all, Enter = quit: _
 ```
@@ -22,9 +22,22 @@ Number = open, text = filter, +name = new session, * = show all, Enter = quit: _
 | `claude-sessions.ps1` | All the logic: reads sessions, shows the list, opens or creates sessions. |
 | `README.md` | This file. |
 
-This folder is a **copy** for safekeeping and sharing. The installed copy that actually runs on this PC is in `C:\Users\dorrah\.local\bin\`. If you change a file here, copy it there too, or the `cs` command won't pick up the change.
-
 ## Install
+
+### Quick install
+
+Paste this into PowerShell. It downloads the two files into `C:\Users\<you>\.local\bin`, the folder where the Claude Code installer puts `claude.exe`, which is already on your PATH:
+
+```powershell
+$bin = "$env:USERPROFILE\.local\bin"
+$base = 'https://raw.githubusercontent.com/ZiadDorrah/Claude-Sessions/main'
+New-Item -ItemType Directory -Force $bin | Out-Null
+foreach ($f in 'cs.cmd', 'claude-sessions.ps1') { Invoke-WebRequest "$base/$f" -OutFile "$bin\$f" -UseBasicParsing }
+```
+
+Open a new terminal and type `cs`. If Windows says `cs` isn't recognized, that folder isn't on your PATH; see step 3 below.
+
+### Manual install
 
 1. Copy `cs.cmd` and `claude-sessions.ps1` **into the same folder**. `cs.cmd` finds the script next to itself.
 2. That folder must be on your `PATH`. The easiest choice is `C:\Users\<you>\.local\bin`. The Claude Code installer puts `claude.exe` there and has already added it to PATH. To check, run this in PowerShell and use the folder it shows:
@@ -44,15 +57,15 @@ Requirements: Windows with the built-in Windows PowerShell 5.1, and Claude Code 
 | You type | What happens |
 |---|---|
 | `cs` | Shows all sessions, newest first |
-| `cs odoo backup` | Shows the list already filtered; every word must match |
-| `cs + HR payroll fixes` | Starts a new session named "HR payroll fixes" in the current folder, without showing the list |
+| `cs api login` | Shows the list already filtered; every word must match |
+| `cs + Fix checkout bug` | Starts a new session named "Fix checkout bug" in the current folder, without showing the list |
 
 At the prompt:
 
 | You type | What happens |
 |---|---|
 | `3` | Opens session #3: moves into its folder and runs `claude --resume <id>` |
-| `logistics` | Filters the list by title, first message, folder and session ID |
+| `login` | Filters the list by title, first message, folder and session ID |
 | `*` | Clears the filter |
 | `1b11db3e` | Opens the session whose ID starts with this (8+ characters, e.g. pasted from somewhere) |
 | `+ New task name` | Starts a new session with that name in the current folder |
@@ -87,4 +100,4 @@ New sessions open in the folder you ran `cs` from, so `cd` into your project fir
 
 ## Uninstall
 
-Delete `cs.cmd` and `claude-sessions.ps1` from the folder you installed them in (here: `C:\Users\dorrah\.local\bin\`). Nothing else was changed: no registry entries, no PowerShell profile, no settings.
+Delete `cs.cmd` and `claude-sessions.ps1` from the folder you installed them in (with the quick install: `C:\Users\<you>\.local\bin\`). Nothing else was changed: no registry entries, no PowerShell profile, no settings.
