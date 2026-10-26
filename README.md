@@ -77,7 +77,7 @@ New sessions open in the folder you ran `cs` from, so `cd` into your project fir
 
 ## How it works
 
-- **Where sessions come from.** Claude Code saves each session as a `.jsonl` file under `C:\Users\<you>\.claude\projects\<project-folder>\`. The script reads every one of them.
+- **Where sessions come from.** Claude Code saves each session as a `.jsonl` file under `C:\Users\<you>\.claude\projects\<project-folder>\`. The script lists every one of them.
 - **Titles.** The title shown is, in order of preference:
   1. the name you gave the session
   2. the title Claude generated for it
@@ -86,7 +86,9 @@ New sessions open in the folder you ran `cs` from, so `cd` into your project fir
   5. a slash command, only if there is nothing else
 - **Hidden sessions.** Sessions that never got a reply from Claude are left out (for example one where you only ran `/clear`), because there is nothing to resume.
 - **Why it changes folder.** Claude finds a session by the folder it is started in, so the script `cd`s into the session's original folder before running `claude --resume <id>`. If a session was moved, it uses the folder that matches where the session file is stored.
-- **Speed.** About 1–2 seconds for ~20 sessions (~19 MB). It reads the whole history each time so it can find titles, which may be saved anywhere in the file.
+- **Speed.** Session files only ever grow at the end, so the script remembers how far it has read each one and what it found there, and the next run reads only the new lines. The first run reads everything (about 5 seconds for ~45 sessions / 250 MB). After that `cs` opens in about 1.5 seconds, however large the history gets.
+- **Antivirus.** Some antivirus products (Kaspersky, for example) rescan a whole file the first time it is opened after a change. For a long session full of pasted screenshots that can take half a minute. So `cs` doesn't open the files of sessions it already knows: it lists them from its cache, then starts a hidden background PowerShell (`claude-sessions.ps1 -RefreshCache`) that reads their new lines for the next run. Only one refresh runs at a time.
+- **Cache.** Saved in `C:\Users\<you>\AppData\Local\claude-sessions\cache.json`: each session's title, folder, first message and how far its file has been read. It's safe to delete; the next run rebuilds it.
 
 ## Limitations
 
@@ -95,9 +97,10 @@ New sessions open in the folder you ran `cs` from, so `cd` into your project fir
 - **Don't open a session that's already running** in another window or in the desktop app. Two windows writing to the same conversation will conflict.
 - **Each PC lists only its own sessions.** Sessions live in that PC's `C:\Users\<you>\.claude\projects`, so copying the script doesn't bring them along.
 - **Names with `"` characters** get the quotes removed, because Windows PowerShell 5.1 passes them to programs incorrectly.
-- **Searching** looks at titles, first messages, folders and IDs, not the whole conversation, to stay fast.
+- **New titles can show up one run late.** If a session that's already listed is renamed, or gets a new title while it's running, `cs` shows the old title until the background refresh has caught up, usually by the next time you run it. New sessions appear straight away.
+- **Searching** looks at titles, first messages (their first 500 characters), folders and IDs, not the whole conversation, to stay fast.
 - **It relies on Claude Code's session file format** (entries like `custom-title`, `ai-title`, `last-prompt`, `cwd`). A future Claude Code update that changes the format could hide titles or sessions until the script is updated.
 
 ## Uninstall
 
-Delete `cs.cmd` and `claude-sessions.ps1` from the folder you installed them in (with the quick install: `C:\Users\<you>\.local\bin\`). Nothing else was changed: no registry entries, no PowerShell profile, no settings.
+Delete `cs.cmd` and `claude-sessions.ps1` from the folder you installed them in (with the quick install: `C:\Users\<you>\.local\bin\`), and the cache folder `C:\Users\<you>\AppData\Local\claude-sessions`. Nothing else was changed: no registry entries, no PowerShell profile, no settings.
