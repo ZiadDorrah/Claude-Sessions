@@ -4,7 +4,8 @@
 #        cs -RefreshCache       (internal: the hidden background run described below)
 param([switch]$RefreshCache, [Parameter(ValueFromRemainingArguments = $true)][string[]]$Words)
 
-$root = Join-Path $env:USERPROFILE '.claude\projects'
+$claudeDir = Join-Path $env:USERPROFILE '.claude'
+$root = Join-Path $claudeDir 'projects'
 
 # Session files are append-only, so remember how far each one was read and what was
 # found; the next run parses only the lines added since. Delete this file to rebuild.
@@ -169,6 +170,7 @@ function Get-Session([IO.FileInfo]$file, $st) {
     $shown = @($st.Title, $st.AiTitle, $st.First, $st.Last, $st.FirstCmd) | Where-Object { $_ } | Select-Object -First 1
     [pscustomobject]@{
         Id      = $file.BaseName
+        Path    = $file.FullName
         Time    = $file.LastWriteTime
         Cwd     = $cwd
         Folder  = Get-FolderLabel $cwd
@@ -234,6 +236,75 @@ function Start-NewSession([string]$name) {
     exit $LASTEXITCODE
 }
 
+# Claude Code registers each running session in .claude\sessions\<pid>.json; the
+# start time guards against a stale file whose process ID was reused.
+function Get-RunningPid([string]$id) {
+    foreach ($f in Get-ChildItem -LiteralPath (Join-Path $claudeDir 'sessions') -Filter *.json -File -ErrorAction SilentlyContinue) {
+        try {
+            $info = [IO.File]::ReadAllText($f.FullName) | ConvertFrom-Json
+            if ($info.sessionId -ne $id) { continue }
+            $p = Get-Process -Id $info.pid -ErrorAction SilentlyContinue
+            if (-not $p) { continue }
+            $started = try { "$($p.StartTime.ToFileTimeUtc())" } catch { $null }
+            if (-not $started -or -not $info.procStart -or $started -eq "$($info.procStart)") { return $info.pid }
+        } catch { }
+    }
+    $null
+}
+
+# The first entries of a transcript record where it was started ("cli" or "claude-desktop").
+function Test-DesktopSession([string]$path) {
+    $fs = [IO.File]::Open($path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+    $reader = New-Object IO.StreamReader($fs, [Text.Encoding]::UTF8)
+    try {
+        for ($i = 0; $i -lt 50 -and $null -ne ($l = $reader.ReadLine()); $i++) {
+            if ($l -match '"entrypoint":"([^"]*)"') { return $Matches[1] -eq 'claude-desktop' }
+        }
+    } finally { $reader.Dispose() }
+    $false
+}
+
+# Moves the transcript and the folders Claude keeps beside it (subagent results,
+# rewind checkpoints, environment) to the Recycle Bin, so a mistake can be undone.
+function Remove-Session($s) {
+    Add-Type -AssemblyName Microsoft.VisualBasic
+    $ui = [Microsoft.VisualBasic.FileIO.UIOption]::OnlyErrorDialogs
+    $bin = [Microsoft.VisualBasic.FileIO.RecycleOption]::SendToRecycleBin
+    [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($s.Path, $ui, $bin)
+    $dirs = (Join-Path (Split-Path $s.Path) $s.Id), (Join-Path $claudeDir "file-history\$($s.Id)"), (Join-Path $claudeDir "session-env\$($s.Id)")
+    foreach ($d in $dirs) {
+        if (Test-Path -LiteralPath $d) { [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($d, $ui, $bin) }
+    }
+}
+
+# Asks once for all the picked sessions and returns the ones that were deleted.
+function Remove-Sessions($picked) {
+    $go = @()
+    foreach ($s in $picked) {
+        $procId = Get-RunningPid $s.Id
+        if ($procId) { Write-Host "'$($s.Title)' is open right now (process $procId). Close it first." -ForegroundColor Red }
+        else { $go += $s }
+    }
+    if (-not $go) { return }
+
+    Write-Host ''
+    foreach ($s in $go) {
+        Write-Host ('  {0}  {1}  {2}' -f $s.Time.ToString('yyyy-MM-dd HH:mm'), (Fit $s.Folder 20), $s.Title)
+        $desktopApp = try { Test-DesktopSession $s.Path } catch { $false }
+        if ($desktopApp) {
+            Write-Host '      Started in the Claude desktop app, which keeps its own list: it may still show there, empty.' -ForegroundColor Yellow
+        }
+    }
+    $what = if ($go.Count -eq 1) { 'this session' } else { "these $($go.Count) sessions" }
+    $yes = "$(Read-Host "Move $what to the Recycle Bin? (y/N)")".Trim()
+    if ($yes -notmatch '^(y|yes)$') { return }
+
+    foreach ($s in $go) {
+        try { Remove-Session $s; $s }
+        catch { Write-Host "Couldn't delete '$($s.Title)': $($_.Exception.Message)" -ForegroundColor Red }
+    }
+}
+
 if (-not (Test-Path -LiteralPath $root)) { Write-Host "No Claude sessions folder at $root"; exit 1 }
 
 if ($RefreshCache) {
@@ -291,10 +362,26 @@ while ($true) {
         continue
     }
 
-    $in = "$(Read-Host "`nNumber = open, text = filter, +name = new session, * = show all, Enter = quit")".Trim()
+    $in = "$(Read-Host "`nNumber = open, -number = delete, text = filter, +name = new session, * = show all, Enter = quit")".Trim()
     if (-not $in) { exit 0 }
     if ($in -eq '*') { $filter = ''; continue }
     if ($in.StartsWith('+')) { Start-NewSession $in.Substring(1) }
+
+    # -3 deletes session #3; -3 5 7 (or -3,5,7) deletes several.
+    if ($in -match '^-\s*\d+([\s,]+\d+)*$') {
+        $nums = @($in.TrimStart('-') -split '[\s,]+' | Where-Object { $_ } | ForEach-Object { [int]$_ } | Select-Object -Unique)
+        $bad = @($nums | Where-Object { $_ -lt 1 -or $_ -gt $list.Count })
+        if ($bad) { Write-Host "No session #$($bad -join ', #') in the list." -ForegroundColor Red; continue }
+        $gone = @(Remove-Sessions @($nums | ForEach-Object { $list[$_ - 1] }))
+        if ($gone) {
+            $ids = @($gone | ForEach-Object { $_.Id })
+            $all = @($all | Where-Object { $ids -notcontains $_.Id })
+            Write-Host "Deleted $($gone.Count). Restore from the Recycle Bin if you need it back." -ForegroundColor Green
+            if (-not $all.Count) { Write-Host 'No sessions left.'; exit 0 }
+            if (-not @($all | Where-Object { Test-Filter $_ $terms }).Count) { $filter = '' }
+        }
+        continue
+    }
 
     $n = 0
     if ([int]::TryParse($in, [ref]$n)) {

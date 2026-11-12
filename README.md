@@ -70,10 +70,14 @@ At the prompt:
 | `1b11db3e` | Opens the session whose ID starts with this (8+ characters, e.g. pasted from somewhere) |
 | `+ New task name` | Starts a new session with that name in the current folder |
 | `+` | Starts a new session with no name |
+| `-3` | Deletes session #3: shows it and asks `Move this session to the Recycle Bin? (y/N)` |
+| `-3 5 7` | Deletes several at once, with one question (`-3,5,7` works too) |
 | Text that matches no session | Asks `Start a new session named '...' in <folder>? (y/N)`. `y` starts it; anything else goes back to the full list |
 | Enter on its own | Quits |
 
 New sessions open in the folder you ran `cs` from, so `cd` into your project first. The name is set with Claude's own `--name` option, so it appears in the prompt box, the terminal title and Claude's `/resume` list.
+
+Deleting moves the session to the Recycle Bin, so a mistake can be undone by restoring it from there. A session that is open right now can't be deleted; close it first.
 
 ## How it works
 
@@ -88,12 +92,15 @@ New sessions open in the folder you ran `cs` from, so `cd` into your project fir
 - **Why it changes folder.** Claude finds a session by the folder it is started in, so the script `cd`s into the session's original folder before running `claude --resume <id>`. If a session was moved, it uses the folder that matches where the session file is stored.
 - **Speed.** Session files only ever grow at the end, so the script remembers how far it has read each one and what it found there, and the next run reads only the new lines. The first run reads everything (about 5 seconds for ~45 sessions / 250 MB). After that `cs` opens in about 1.5 seconds, however large the history gets.
 - **Antivirus.** Some antivirus products (Kaspersky, for example) rescan a whole file the first time it is opened after a change. For a long session full of pasted screenshots that can take half a minute. So `cs` doesn't open the files of sessions it already knows: it lists them from its cache, then starts a hidden background PowerShell (`claude-sessions.ps1 -RefreshCache`) that reads their new lines for the next run. Only one refresh runs at a time.
-- **Cache.** Saved in `C:\Users\<you>\AppData\Local\claude-sessions\cache.json`: each session's title, folder, first message and how far its file has been read. It's safe to delete; the next run rebuilds it.
+- **Cache.** Saved in `C:\Users\<you>\AppData\Local\claude-sessions\cache.json`: each session's title, folder, first message and how far its file has been read. It's safe to delete; the next run rebuilds it. A session created since the last `cs` isn't in the cache yet, so if it has grown large in the meantime, that one run can be slow while the antivirus scans it.
+- **What deleting removes.** The session's `.jsonl` plus the folders Claude keeps for it: `projects\<project-folder>\<id>\` (subagent results, large tool output), `file-history\<id>\` (the checkpoints `/rewind` uses) and `session-env\<id>\`, all under `C:\Users\<you>\.claude`. They all go to the Recycle Bin.
+- **Spotting a running session.** Claude Code writes a small file for every running session to `C:\Users\<you>\.claude\sessions\`. `cs` checks it, and that the process it names is still the same one, before deleting.
 
 ## Limitations
 
 - **Desktop app sessions** show as `desktop app` and can't be opened from `cs`. The Claude desktop app is a Windows Store (MSIX) app: the folder it records (under `AppData\Roaming\Claude\...`) only exists inside the app. On disk it is really under `AppData\Local\Packages\Claude_*\LocalCache\Roaming`, so a terminal `claude --resume` can't match it. Choosing one tells you to open it in the desktop app.
-- **Deleted folders** show grey with `(missing)` and can't be opened. Claude can only resume a session from its original folder.
+- **Deleting a desktop app session** removes its history, but the desktop app keeps its own list of sessions, so it may still show there, empty. `cs` warns about this before asking. Deleting it from inside the app is cleaner.
+- **Deleted folders** show grey with `(missing)` and can't be opened. Claude can only resume a session from its original folder. You can still delete these sessions from `cs`.
 - **Don't open a session that's already running** in another window or in the desktop app. Two windows writing to the same conversation will conflict.
 - **Each PC lists only its own sessions.** Sessions live in that PC's `C:\Users\<you>\.claude\projects`, so copying the script doesn't bring them along.
 - **Names with `"` characters** get the quotes removed, because Windows PowerShell 5.1 passes them to programs incorrectly.
